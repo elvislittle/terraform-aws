@@ -29,3 +29,11 @@ variable "path_pattern" {
   description = "Path pattern for listener rule"
   type        = string
 }
+
+# MULTIPLE APPS SUPPORT
+
+# Define the app name variable
+variable "app_name" {
+  description = "Name of the application for resource naming"
+  type        = string
+}
