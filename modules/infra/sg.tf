@@ -4,7 +4,7 @@
 
 # Create a security group for the ALB - acts as firewall for load balancer
 resource "aws_security_group" "alb" {
-  name        = "tf-alb-sg"
+  name        = "${var.app_name}-alb-sg" # nginx-alb-sg, apache-alb-sg
   description = "Security group for ALB"
   vpc_id      = aws_vpc.this.id
 }
@@ -34,7 +34,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_ecs_egress" {
 
 # Create a security group for the ECS tasks - acts as firewall for app containers
 resource "aws_security_group" "ecs_tasks" {
-  name        = "tf-ecs-tasks-sg"
+  name        = "${var.app_name}-ecs-sg" # nginx-ecs-sg, apache-ecs-sg
   description = "Security group for ECS tasks"
   vpc_id      = aws_vpc.this.id
 }

@@ -24,6 +24,7 @@ data "aws_ecr_authorization_token" "this" {} # the token is an OBJECT with user_
 resource "terraform_data" "login" {
   provisioner "local-exec" {
     command = <<-EOF
+    docker logout ${local.ecr_url} || true
     docker login ${local.ecr_url} \
     --username  ${local.ecr_token.user_name} \
     --password  ${local.ecr_token.password}
@@ -59,7 +60,7 @@ resource "terraform_data" "push" {
 
 # Create CloudWatch log group for container logs
 resource "aws_cloudwatch_log_group" "this" {
-  name              = "/ecs/ui-task"
+  name              = "/ecs/${var.app_name}-task" # Log group name based on app name
   retention_in_days = 7
 }
 
@@ -80,7 +81,7 @@ resource "aws_ecs_task_definition" "this" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = "/ecs/ui-task"
+          "awslogs-group"         = "/ecs/${var.app_name}-task"
           "awslogs-region"        = "us-east-1"
           "awslogs-stream-prefix" = "ecs"
         }
