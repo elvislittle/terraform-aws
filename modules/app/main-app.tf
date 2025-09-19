@@ -24,7 +24,10 @@ data "aws_ecr_authorization_token" "this" {} # the token is an OBJECT with user_
 resource "terraform_data" "login" {
   provisioner "local-exec" {
     command = <<-EOF
+    
     docker logout ${local.ecr_url} || true
+    security delete-internet-password -s ${local.ecr_url} || true
+
     docker login ${local.ecr_url} \
     --username  ${local.ecr_token.user_name} \
     --password  ${local.ecr_token.password}
@@ -109,6 +112,7 @@ resource "aws_ecs_task_definition" "this" {
 
 # Create an ECS Service - maintains desired number of running tasks and registers them with ALB - similar to a deployment in Kubernetes
 resource "aws_ecs_service" "this" {
+  depends_on      = [terraform_data.push] # Wait for Docker image to be pushed to ECR
   name            = "${var.app_name}-service"        # Name of the ECS service
   cluster         = aws_ecs_cluster.this.id          # Which cluster to run in
   task_definition = aws_ecs_task_definition.this.arn # What containers to run

@@ -1,0 +1,6 @@
+# Development S3 backend configuration (partial backend config)
+# Usage options:
+# 1. File:   terraform init -backend-config=dev.s3.tfbackend
+# 2. Inline: terraform init -backend-config="bucket=terraform-aws-dev-18092026"
+
+bucket = "terraform-aws-dev-18092026"

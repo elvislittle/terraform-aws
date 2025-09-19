@@ -1,4 +1,4 @@
-# Output ALB URLs for each app
+# # Output ALB URLs for each app
 output "app_urls" {
   description = "URLs for accessing each application"
   value = {
