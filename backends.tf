@@ -24,11 +24,11 @@ terraform {
 # Usage options:
 # 1. File:   terraform init -backend-config=dev.s3.tfbackend
 # 2. Inline: terraform init -backend-config="bucket=my-bucket-name"
-terraform {
-  backend "s3" {
-    bucket       = ""
-    key          = "terraform.tfstate"
-    region       = "us-east-1"
-    use_lockfile = true
-  }
-}
+# terraform {
+#   backend "s3" {
+#     bucket       = ""
+#     key          = "terraform.tfstate"
+#     region       = "us-east-1"
+#     use_lockfile = true
+#   }
+# }
