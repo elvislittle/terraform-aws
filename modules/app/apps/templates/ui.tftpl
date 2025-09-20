@@ -5,7 +5,6 @@ WORKDIR /usr/share/nginx/html
 COPY index.html .
 COPY script.js .
 
-
 %{ for key, value in build_args }
 ARG ${key}="${value}"
 %{ endfor }

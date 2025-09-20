@@ -56,7 +56,45 @@ variable "app_security_group_id" {
 }
 
 # ARN of the target group to associate with the ECS service
-variable "alb_target_group_arn" {
-  description = "ARN of the target group to associate with the ECS service"
+# variable "alb_target_group_arn" {
+#   description = "ARN of the target group to associate with the ECS service"
+#   type        = string
+# }
+
+# Define the path pattern variable for listener rule
+variable "path_pattern" {
+  description = "Path pattern for listener rule"
   type        = string
+}
+
+# Define the health check path variable
+variable "healthcheck_path" {
+  description = "Path for health checks, e.g. /api/healthcheck"
+  type        = string
+}
+
+#
+variable "envars" {
+  type = list(map(any))
+}
+
+# 
+variable "secrets" {
+  type = list(map(any))
+}
+
+variable "lb_priority" {
+  type = number
+}
+
+variable "cluster_arn" {
+  type = string
+}
+
+variable "vpc_id" {
+  type = string
+}
+
+variable "alb_listener_arn" {
+  type = string
 }

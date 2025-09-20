@@ -19,13 +19,28 @@ output "app_security_group_id" {
 }
 
 # Output ALB Target Group ARN
-output "alb_target_group_arn" {
-  description = "ARN of the ALB Target Group"
-  value       = aws_lb_target_group.this.arn
-}
+# output "alb_target_group_arn" {
+#   description = "ARN of the ALB Target Group"
+#   value       = aws_lb_target_group.this.arn
+# }
 
 # Output ALB DNS name
 output "alb_dns_name" {
   description = "DNS name of the Application Load Balancer"
   value       = aws_lb.this.dns_name
+}
+
+# Output ECS Cluster ARN
+output "cluster_arn" {
+  value = aws_ecs_cluster.this.arn
+}
+
+# Output VPC ID
+output "vpc_id" {
+  value = aws_vpc.this.id
+}
+
+# Output ALB Listener ARN
+output "alb_listener_arn" {
+  value = aws_lb_listener.this.arn
 }

@@ -10,7 +10,6 @@ CORS(app, resources={"/api/*": {"origins": "*"}})
 # Initialize Bedrock client
 try:
     bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
-    print("Bedrock client initialized successfully")
 except Exception as e:
     bedrock_client = None
     print(f"Warning: Could not initialize Bedrock client: {e}")
@@ -18,50 +17,59 @@ except Exception as e:
 def get_terraform_question():
     """Fetches a Terraform question using AWS Bedrock."""
     if not bedrock_client:
-        return "What is the purpose of terraform init command?"
+        return "I can't get the question"
     
     try:
         response = bedrock_client.invoke_model(
-            modelId='amazon.titan-text-lite-v1',
+            modelId='amazon.titan-text-express-v1',
             body=json.dumps({
-                "inputText": "Generate a Terraform configuration trivia question. Only return the question:",
+                "inputText": "You are a Terraform teacher responsible for Terraform class. Provide a Terraform configuration trivia question and only the question.",
                 "textGenerationConfig": {
-                    "maxTokenCount": 100,
-                    "temperature": 0.7
+                    "maxTokenCount": 50,
+                    "temperature": 0.7,
+                    "stopSequences": ["\n", "?"]
                 }
             })
         )
         
         result = json.loads(response['body'].read())
-        return result['results'][0]['outputText'].strip()
+        question = result['results'][0]['outputText'].strip()
+        
+        # Clean up the response - remove any extra text after the question
+        if '?' in question:
+            question = question.split('?')[0] + '?'
+        
+        return question
     except Exception as e:
         print(f"Error with Bedrock: {e}")
-        return "What command applies Terraform changes?"
+        return "Failed to generate question. Please try again later."
 
 def get_answer_feedback(question, answer):
     """Get feedback using AWS Bedrock."""
     if not bedrock_client:
-        return "Unable to provide feedback - Bedrock not available"
+        return "I can't get feedback"
     
     try:
-        prompt = f"Question: {question}\nAnswer: {answer}\nIs this answer correct? Respond with 'Correct' or provide brief feedback:"
+        prompt = f"You are a Terraform teacher. Question: {question}\nStudent Answer: {answer}\nProvide correct/incorrect feedback for completely incorrect answers only, otherwise, just say 'Correct'. Correctness is extremely important. Always err on the side of correctness."
         
         response = bedrock_client.invoke_model(
-            modelId='amazon.titan-text-lite-v1',
+            modelId='amazon.titan-text-express-v1',
             body=json.dumps({
                 "inputText": prompt,
                 "textGenerationConfig": {
-                    "maxTokenCount": 50,
-                    "temperature": 0.3
+                    "maxTokenCount": 30,
+                    "temperature": 0.3,
+                    "stopSequences": ["\n"]
                 }
             })
         )
         
         result = json.loads(response['body'].read())
-        return result['results'][0]['outputText'].strip()
+        feedback = result['results'][0]['outputText'].strip()
+        return feedback
     except Exception as e:
         print(f"Error with Bedrock feedback: {e}")
-        return "Unable to provide feedback at this time."
+        return "Failed to get feedback. Please try again later."
 
 # Create a Blueprint for API routes with the prefix /api
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -79,11 +87,11 @@ def test_bedrock():
     
     try:
         response = bedrock_client.invoke_model(
-            modelId='amazon.titan-text-lite-v1',
+            modelId='amazon.titan-text-express-v1',
             body=json.dumps({
                 "inputText": "Say hello",
                 "textGenerationConfig": {
-                    "maxTokenCount": 10,
+                    "maxTokenCount": 5,
                     "temperature": 0.7
                 }
             })

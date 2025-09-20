@@ -6,11 +6,6 @@ locals {
   ecr_url   = aws_ecr_repository.this.repository_url # URL of the ECR repository - used by Docker build and push commands
 }
 
-# Create an ECS cluster - logical grouping where containers run (like a server farm)
-resource "aws_ecs_cluster" "this" {
-  name = "tf-ecs-cluster"
-}
-
 # Create a ECR repository - private Docker registry to store your app images
 resource "aws_ecr_repository" "this" {
   name         = var.ecr_repository_name
@@ -38,6 +33,9 @@ resource "terraform_data" "login" {
 # Build a Docker image for the application - creates container image from your app code
 resource "terraform_data" "build" {
   depends_on = [terraform_data.login] # Ensure we login to ECR before building the image
+  triggers_replace = [
+    var.app_version # Triggers rebuild when version changes
+  ]
   provisioner "local-exec" {
     # Build the Docker image with name = ECR URL and tag = latest (implicit because no tag specified)
     command = "docker build --platform linux/amd64 -t ${local.ecr_url} ${path.module}/apps/${var.app_path}" # the general format is "docker build -t <image_name:tag> <path_to_dockerfile>"
@@ -47,7 +45,7 @@ resource "terraform_data" "build" {
 # Tag and push the Docker image - creates version tags and uploads to ECR
 resource "terraform_data" "push" {
   triggers_replace = [
-    var.app_version # Triggers rebuild when version changes
+    var.app_version # Triggers re-push when version changes
   ]
   depends_on = [terraform_data.login, terraform_data.build] # Ensure we login to ECR and build the image before pushing
   # We use provisioner to: 1) tag the image with version and latest, 2) push both tags to ECR
@@ -75,12 +73,16 @@ resource "aws_ecs_task_definition" "this" {
   network_mode             = "awsvpc"                   # Each task gets its own network interface
   cpu                      = "256"                      # 0.25 vCPU
   memory                   = "512"                      # 512 MB RAM
-  execution_role_arn       = var.app_execution_role_arn # IAM role used by ECS tasks to pull images and write logs
-  container_definitions = jsonencode([                  # Container definitions are in JSON format, so we use jsonencode to convert from HCL to JSON
+  execution_role_arn       = var.app_execution_role_arn # IAM role used by ECS tasks to pull images from ECR and write logs. "What ECS needs to run your container"
+  task_role_arn            = var.app_execution_role_arn # This reuses your existing execution role (which now has Bedrock permissions) as the task role too. "What your app needs to do its job"
+
+  container_definitions = jsonencode([ # Container definitions are in JSON format, so we use jsonencode to convert from HCL to JSON
     {
-      name      = var.app_name              # Name of the container inside the task (the only container in this case)
-      image     = "${local.ecr_url}:latest" # Docker image from ECR repository of the app (latest tag)
-      essential = true                      # If this container stops, stop the entire task
+      name        = var.app_name                          # Name of the container inside the task (the only container in this case)
+      image       = "${local.ecr_url}:${var.app_version}" # Docker image from ECR repository of the app (latest tag)
+      essential   = true                                  # If this container stops, stop the entire task
+      environment = var.envars
+      secrets     = var.secrets
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -112,9 +114,9 @@ resource "aws_ecs_task_definition" "this" {
 
 # Create an ECS Service - maintains desired number of running tasks and registers them with ALB - similar to a deployment in Kubernetes
 resource "aws_ecs_service" "this" {
-  depends_on      = [terraform_data.push] # Wait for Docker image to be pushed to ECR
+  depends_on      = [terraform_data.push]            # Wait for Docker image to be pushed to ECR
   name            = "${var.app_name}-service"        # Name of the ECS service
-  cluster         = aws_ecs_cluster.this.id          # Which cluster to run in
+  cluster         = var.cluster_arn                  # Which cluster to run in
   task_definition = aws_ecs_task_definition.this.arn # What containers to run
   desired_count   = 1                                # Keep 1 container running at all times
   launch_type     = "FARGATE"                        # Serverless container hosting
@@ -125,9 +127,54 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = var.is_public               # Give containers public IP for internet access
   }
   load_balancer {
-    target_group_arn = var.alb_target_group_arn # Register containers with this target group. ECS only knows about TARGET GROUP. ECS Service doesn't know about ALB at all!
-    container_name   = var.app_name             # Which container within the task to route traffic to. Only ONE container per task can be registered with a specific target group
-    container_port   = var.app_port             # Which port of the container ALB should send traffic to
+    target_group_arn = aws_lb_target_group.this.arn # Register containers with this target group. ECS only knows about TARGET GROUP. ECS Service doesn't know about ALB at all!
+    container_name   = var.app_name                 # Which container within the task to route traffic to. Only ONE container per task can be registered with a specific target group
+    container_port   = var.app_port                 # Which port of the container ALB should send traffic to
   }
 }
 
+# Here OPTIONAL - create a listener RULE - routes requests based on conditions
+resource "aws_lb_listener_rule" "this" {
+  listener_arn = var.alb_listener_arn
+  priority     = var.lb_priority
+
+  condition {
+    path_pattern {
+      values = [var.path_pattern]
+    }
+  }
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.this.arn
+  }
+
+}
+
+# Create a target group - shared registry where ECS registers healthy containers and ALB finds targets to route traffic to
+resource "aws_lb_target_group" "this" {
+  name        = "${var.app_name}-tg" # nginx-tg, apache-tg
+  port        = var.app_port         # Port where containers listen
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip" # Track containers by IP address (required for Fargate)
+
+  # Lifecycle purpose:
+  # - New target group gets created first
+  # - Listener rule gets updated to use new target group
+  # - ECS service gets updated to use new target group
+  # - Old target group can now be safely deleted (no longer in use)
+  lifecycle {
+    create_before_destroy = true # Helps to handle destruction process
+  }
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2                    # 2 successful checks = healthy
+    unhealthy_threshold = 2                    # 2 failed checks = unhealthy
+    timeout             = 5                    # Wait 5 seconds for response
+    interval            = 30                   # Check every 30 seconds
+    path                = var.healthcheck_path # Check this URL path
+    matcher             = "200"                # Expect HTTP 200 response
+  }
+}

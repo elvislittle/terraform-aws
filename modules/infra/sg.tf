@@ -4,7 +4,6 @@
 
 # Create a security group for the ALB - acts as firewall for load balancer
 resource "aws_security_group" "alb" {
-  name        = "${var.app_name}-alb-sg" # nginx-alb-sg, apache-alb-sg
   description = "Security group for ALB"
   vpc_id      = aws_vpc.this.id
 }
@@ -24,9 +23,7 @@ resource "aws_vpc_security_group_ingress_rule" "internet_to_alb" {
 resource "aws_vpc_security_group_egress_rule" "alb_to_ecs_egress" {
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.ecs_tasks.id
-  from_port                    = var.app_port
-  to_port                      = var.app_port
-  ip_protocol                  = "tcp"
+  ip_protocol                  = "-1"
   description                  = "Allow HTTP traffic from ALB to ECS tasks"
 }
 
@@ -34,7 +31,6 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_ecs_egress" {
 
 # Create a security group for the ECS tasks - acts as firewall for app containers
 resource "aws_security_group" "ecs_tasks" {
-  name        = "${var.app_name}-ecs-sg" # nginx-ecs-sg, apache-ecs-sg
   description = "Security group for ECS tasks"
   vpc_id      = aws_vpc.this.id
 }
@@ -43,9 +39,7 @@ resource "aws_security_group" "ecs_tasks" {
 resource "aws_vpc_security_group_ingress_rule" "alb_to_ecs" {
   security_group_id            = aws_security_group.ecs_tasks.id # Security group of ECS tasks (containers)
   referenced_security_group_id = aws_security_group.alb.id       # Reference security group of ALB to allow traffic from it
-  from_port                    = var.app_port                    # Start of port range (80)
-  to_port                      = var.app_port                    # End of port range (80) = SINGLE PORT
-  ip_protocol                  = "tcp"
+  ip_protocol                  = "-1"                            # All ports and protocols (TCP, UDP, ICMP, etc.)
   description                  = "Allow HTTP traffic from ALB to ECS tasks"
 }
 
@@ -53,6 +47,6 @@ resource "aws_vpc_security_group_ingress_rule" "alb_to_ecs" {
 resource "aws_vpc_security_group_egress_rule" "ecs_to_anywhere" {
   security_group_id = aws_security_group.ecs_tasks.id # Security group of ECS tasks (containers)
   cidr_ipv4         = "0.0.0.0/0"                     # Destination for all IPv4 traffic - anywhere
-  ip_protocol       = "-1"                            # All protocols (TCP, UDP, ICMP, etc.)
+  ip_protocol       = "-1"                            # All ports and protocols (TCP, UDP, ICMP, etc.)
   description       = "Allow all outbound traffic from ECS tasks"
 }

@@ -71,7 +71,7 @@ resource "aws_route_table_association" "this" {
 
 # Create a load balancer - distributes incoming internet traffic across ECS containers
 resource "aws_lb" "this" {
-  name               = "${var.app_name}-alb"
+  name               = "terraform-aws-alb"
   internal           = false         # Internet-facing (not internal)
   load_balancer_type = "application" # Layer 7 HTTP/HTTPS load balancer
   security_groups    = [aws_security_group.alb.id]
@@ -83,60 +83,28 @@ resource "aws_lb_listener" "this" {
   load_balancer_arn = aws_lb.this.arn
   port              = "80" # Listen on port 80 for HTTP traffic
   protocol          = "HTTP"
-  # default_action {
-  #   type = "fixed-response"  # Default response when no ECS tasks are available
-  #   fixed_response {
-  #     content_type = "text/plain"
-  #     message_body = "ALB is working, but ECS tasks are not there yet"
-  #     status_code  = "503"
-  #   }
-  # }
-  default_action {                                  # Default action when no listener rules match
-    type             = "forward"                    # Forward traffic to target group
-    target_group_arn = aws_lb_target_group.this.arn # Send to ECS containers
-  }
-}
-
-# Here OPTIONAL - create a listener RULE - routes requests based on conditions
-resource "aws_lb_listener_rule" "this" {
-  listener_arn = aws_lb_listener.this.arn
-  priority     = 100
-
-  condition {
-    path_pattern {
-      values = [var.path_pattern] # Match all paths (/*
+  default_action {
+    type = "fixed-response" # Default response when no ECS tasks are available
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "ALB is working, but ECS tasks are not there yet"
+      status_code  = "503"
     }
   }
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.this.arn
-  }
-
+  # default_action {                                  # Default action when no listener rules match
+  #   type             = "forward"                    # Forward traffic to target group
+  #   target_group_arn = aws_lb_target_group.this.arn # Send to ECS containers
+  # }
 }
 
-# Create a target group - shared registry where ECS registers healthy containers and ALB finds targets to route traffic to
-resource "aws_lb_target_group" "this" {
-  name        = "${var.app_name}-tg" # nginx-tg, apache-tg
-  port        = var.app_port         # Port where containers listen
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.this.id
-  target_type = "ip" # Track containers by IP address (required for Fargate)
-
-  health_check {
-    enabled             = true
-    healthy_threshold   = 2     # 2 successful checks = healthy
-    unhealthy_threshold = 2     # 2 failed checks = unhealthy
-    timeout             = 5     # Wait 5 seconds for response
-    interval            = 30    # Check every 30 seconds
-    path                = "/"   # Check this URL path
-    matcher             = "200" # Expect HTTP 200 response
-  }
+# Create an ECS cluster - logical grouping where containers run (like a server farm)
+resource "aws_ecs_cluster" "this" {
+  name = "tf-ecs-cluster"
 }
 
 # IAM role for ECS task execution - to give ECS permission (e.g. to pull images from ECR and write logs) AFTER attaching the corresponding IAM policy to the role
 resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "${var.app_name}-execution-role" # nginx-execution-role, apache-execution-role
+  name = "ecsExecutionRole"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -151,8 +119,40 @@ resource "aws_iam_role" "ecs_task_execution_role" {
   })
 }
 
-# IAM role policy attachment - attaches AWS managed policy that allows ECR pulls and CloudWatch logs
+# Attach *AWS managed* policy that allows ECR pulls and CloudWatch logs to ecs_task_execution_role
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
-  role       = aws_iam_role.ecs_task_execution_role.name
+  role       = aws_iam_role.ecs_task_execution_role.name # this name is dynamically defined in ecs_task_execution_role with: name = "${var.app_name}-execution-role"
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+
+# Create a policy to allow ECS Tasks retrieve secrets from Secrets Manager
+resource "aws_iam_policy" "ecs_secrets_policy" {
+  name        = "ecs-secrets-policy"
+  description = "Allow ECS Tasks to retrieve secrets from Secrets Manager"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "SecretsManager:GetSecretValue",
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      {
+        Action = [
+          "bedrock:InvokeModel",
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+# Attach the *created* ecs_secrets_policy to ecs_task_execution_role
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_secrets_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = aws_iam_policy.ecs_secrets_policy.arn
+}
+
