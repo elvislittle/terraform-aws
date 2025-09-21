@@ -71,7 +71,7 @@ locals {
     api = {
       ecr_repository_name = "api"
       app_path            = "api"
-      app_version         = "v1.0.9"
+      app_version         = "v1.0.13"
       app_name            = "api"
       app_port            = 5000
       is_public           = true

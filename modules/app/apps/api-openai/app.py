@@ -1,106 +1,93 @@
 from flask import Flask, request, jsonify, Blueprint
 from flask_cors import CORS
-import boto3
-import json
+from openai import OpenAI
 import os
-
 app = Flask(__name__)
+# CORS(app)  # Enable CORS for frontend to access backend
 CORS(app, resources={"/api/*": {"origins": "*"}})
-
-# Initialize Bedrock client
-try:
-    bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
-except Exception as e:
-    bedrock_client = None
-    print(f"Warning: Could not initialize Bedrock client: {e}")
-
+# Retrieve the API key from the environment
+OPEN_AI_API_KEY = os.getenv("OPEN_AI_API_KEY")
+if OPEN_AI_API_KEY:
+    client = OpenAI(api_key=OPEN_AI_API_KEY)
+else:
+    client = None
+    print("Warning: OPEN_AI_API_KEY environment variable not set. API calls will use default responses.")
 def get_terraform_question():
-    """Fetches a Terraform question using AWS Bedrock."""
-    if not bedrock_client:
+    """Fetches a Terraform question from OpenAI API or returns a default message if the API key is missing."""
+    if not client:
         return "I can't get the question"
-    
     try:
-        response = bedrock_client.invoke_model(
-            modelId='amazon.titan-text-express-v1',
-            body=json.dumps({
-                "inputText": "You are a Terraform teacher responsible for Terraform class. Provide a Terraform configuration trivia question and only the question.",
-                "textGenerationConfig": {
-                    "maxTokenCount": 50,
-                    "temperature": 0.7,
-                    "stopSequences": ["\n", "?"]
-                }
-            })
+        response = client.chat.completions.create(
+            model="gpt-4o",  # Or your preferred model
+            messages=[
+                {"role": "system", "content": "You are a Terraform teacher responsible for Terraform class."},
+                {"role": "user", "content": "Provide a Terraform configuration trivia question and only the question."},
+            ],
         )
-        
-        result = json.loads(response['body'].read())
-        question = result['results'][0]['outputText'].strip()
-        
-        # Clean up the response - remove any extra text after the question
-        if '?' in question:
-            question = question.split('?')[0] + '?'
-        
+        question = response.choices[0].message.content
         return question
     except Exception as e:
-        print(f"Error with Bedrock: {e}")
+        print(f"Error fetching question from OpenAI: {e}")
         return "Failed to generate question. Please try again later."
-
 def get_answer_feedback(question, answer):
-    """Get feedback using AWS Bedrock."""
-    if not bedrock_client:
+    """Submits question and answer to OpenAI API for feedback or returns a default message if the API key is missing."""
+    if not client:
         return "I can't get feedback"
-    
     try:
-        prompt = f"You are a Terraform teacher. Question: {question}\nStudent Answer: {answer}\nProvide correct/incorrect feedback for completely incorrect answers only, otherwise, just say 'Correct'. Correctness is extremely important. Always err on the side of correctness."
-        
-        response = bedrock_client.invoke_model(
-            modelId='amazon.titan-text-express-v1',
-            body=json.dumps({
-                "inputText": prompt,
-                "textGenerationConfig": {
-                    "maxTokenCount": 30,
-                    "temperature": 0.3,
-                    "stopSequences": ["\n"]
-                }
-            })
+        prompt = (
+            f"Question: {question}\nYour Answer: {answer}\n"
         )
-        
-        result = json.loads(response['body'].read())
-        feedback = result['results'][0]['outputText'].strip()
+        response = client.chat.completions.create(
+            model="gpt-4o",  # Or your preferred model
+            messages=[
+                {"role": "system", "content": "You are a Terraform teacher responsible for Terraform class."},
+                {"role": "user", "content": (
+                    f"Provide correct/incorrect feedback for {prompt} "
+                    "Provide feedback for completely incorrect answers only, otherwise, just say 'Correct'. "
+                    "Correctness is extremely important. Always err on the side of correctness."
+                )},
+            ],
+        )
+        feedback = response.choices[0].message.content
         return feedback
     except Exception as e:
-        print(f"Error with Bedrock feedback: {e}")
+        print(f"Error getting feedback from OpenAI: {e}")
         return "Failed to get feedback. Please try again later."
-
 # Create a Blueprint for API routes with the prefix /api
 api_bp = Blueprint('api', __name__, url_prefix='/api')
-
 @api_bp.route('/healthcheck', methods=['GET'])
 def healthcheck():
     """Simple healthcheck endpoint to verify that the service is running."""
     return jsonify({"status": "ok"})
 
-@api_bp.route('/test-bedrock', methods=['GET'])
-def test_bedrock():
-    """Test Bedrock API connection."""
-    if not bedrock_client:
-        return jsonify({"error": "No Bedrock client"})
+@api_bp.route('/debug-key', methods=['GET'])
+def debug_key():
+    """Debug endpoint to check if API key is available."""
+    key_present = bool(OPEN_AI_API_KEY)
+    key_length = len(OPEN_AI_API_KEY) if OPEN_AI_API_KEY else 0
+    key_prefix = OPEN_AI_API_KEY[:10] + "..." if OPEN_AI_API_KEY and len(OPEN_AI_API_KEY) > 10 else "None"
+    
+    return jsonify({
+        "key_present": key_present,
+        "key_length": key_length,
+        "key_prefix": key_prefix
+    })
+
+@api_bp.route('/test-openai', methods=['GET'])
+def test_openai():
+    """Test OpenAI API connection with a simple call."""
+    if not client:
+        return jsonify({"error": "No OpenAI client"})
     
     try:
-        response = bedrock_client.invoke_model(
-            modelId='amazon.titan-text-express-v1',
-            body=json.dumps({
-                "inputText": "Say hello",
-                "textGenerationConfig": {
-                    "maxTokenCount": 5,
-                    "temperature": 0.7
-                }
-            })
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Use cheaper model for testing
+            messages=[{"role": "user", "content": "Say hello"}],
+            max_tokens=10
         )
-        
-        result = json.loads(response['body'].read())
         return jsonify({
             "success": True,
-            "response": result['results'][0]['outputText'].strip()
+            "response": response.choices[0].message.content
         })
     except Exception as e:
         return jsonify({
@@ -108,13 +95,12 @@ def test_bedrock():
             "error": str(e),
             "error_type": str(type(e))
         })
-
+    
 @api_bp.route('/question', methods=['GET'])
 def question_endpoint():
     """API endpoint to get a Terraform question."""
     question_text = get_terraform_question()
     return jsonify({"question": question_text})
-
 @api_bp.route('/submit', methods=['POST'])
 def submit():
     """API endpoint to submit an answer and get feedback."""
@@ -125,9 +111,7 @@ def submit():
         return jsonify({"error": "Question and answer are required."}), 400
     feedback_text = get_answer_feedback(question_text, user_answer)
     return jsonify({"feedback": feedback_text})
-
 # Register the Blueprint with the Flask application
 app.register_blueprint(api_bp)
-
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0')  # Run on all interfaces for Docker
